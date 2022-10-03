@@ -45,13 +45,31 @@ def receiveOnePing(mySocket, ID, timeout, destAddr):
         recPacket, addr = mySocket.recvfrom(1024)
 
         # Fill in start
-
         # Fetch the ICMP header from the IP packet
+        icmpHeader = recPacket[20:28]
+        rawTTL = struct.unpack("s", recPacket[20:21])[0]
+        # binascii -- Convert between binary and ASCII
+        TTL = int(binascii.hexlify(rawTTL), 16)
+        icmpType, code, checksum, packetID, sequence = struct.unpack(
+            "bbHHh", icmpHeader
+        )
+
+        if packetID == ID:
+            bytes = struct.calcsize("d")
+            timeSent = struct.unpack("d", recPacket[28 : 28 + bytes])[0]
+            delay = "Reply from %s: bytes=%d time=%f5ms TTL=%d" % (
+                destAddr,
+                len(recPacket),
+                (timeReceived - timeSent) * 1000,
+                TTL,
+            )
+            return delay, len(recPacket), (timeReceived - timeSent) * 1000, TTL
 
         # Fill in end
         timeLeft = timeLeft - howLongInSelect
         if timeLeft <= 0:
             return "Request timed out."
+
 
 def sendOnePing(mySocket, destAddr, ID):
     # Header is type (8), code (8), checksum (16), id (16), sequence (16)
@@ -89,9 +107,10 @@ def doOnePing(destAddr, timeout):
 
     myID = os.getpid() & 0xFFFF  # Return the current process i
     sendOnePing(mySocket, destAddr, myID)
-    delay = receiveOnePing(mySocket, myID, timeout, destAddr)
+    delay, bytes, rtt, ttl = receiveOnePing(mySocket, myID, timeout, destAddr)
     mySocket.close()
-    return delay
+    stats = {"bytes": bytes, "rtt": rtt, "ttl": ttl}
+    return delay, stats
 
 def ping(host, timeout=1):
     # timeout=1 means: If one second goes by without a reply from the server,   
@@ -100,22 +119,26 @@ def ping(host, timeout=1):
     print("\nPinging " + dest + " using Python:")
     print("")
     
-   #  response = pd.DataFrame(columns=['bytes','rtt','ttl']) #This creates an empty dataframe with 3 headers with the column specific names declared
-    response = pd.DataFrame({'bytes':[0.0],'rtt':[0.0],'ttl':[0.0]})
+    # This creates an empty dataframe with 3 headers with the column specific names declared
+    response = pd.DataFrame(
+        columns=["bytes", "rtt", "ttl"]
+    )
     #Send ping requests to a server separated by approximately one second
     #Add something here to collect the delays of each ping in a list so you can calculate vars after your ping
     
     for i in range(0,4): #Four pings will be sent (loop runs for i=0, 1, 2, 3)
-        delay = doOnePing(dest, timeout) #what is stored into delay and statistics?
-        # response = #store your bytes, rtt, and ttle here in your response pandas dataframe. An example is commented out below for vars
+        delay, statistics = doOnePing(dest, timeout) 
+        #what is stored into delay and statistics?
+        #store your bytes, rtt, and ttle here in your response pandas dataframe. An example is commented out below for vars
+        response = response.append(statistics, ignore_index=True)
         print(delay) 
-        time.sleep(1)  # wait one second
+        time.sleep(1)
     
     packet_lost = 0
     packet_recv = 0
     #fill in start. UPDATE THE QUESTION MARKS
     for index, row in response.iterrows():
-        if row['rtt'] == 0: #access your response df to determine if you received a packet or not
+        if row.get("rtt") and row["rtt"] == 0: #access your response df to determine if you received a packet or not
             packet_lost = packet_lost + 1
         else:
             packet_recv = packet_recv + 1
